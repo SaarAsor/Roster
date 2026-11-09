@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="סידור משמרת">
+<meta name="theme-color" content="#081640">
+<title>סידור משמרת</title>
+<style>
+:root{--royal:#0033A0;--bg:#F3F5FA;--surface:#fff;--text:#152038;--muted:#5B6782;--line:#E1E6EF;--red:#DC2626;color-scheme:light;box-sizing:border-box}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--royal:#7FA6FF;--bg:#0E1424;--surface:#161E33;--text:#E6EBF7;--muted:#9AA6C4;--line:#2A3556;color-scheme:dark}}
+:root[data-theme="dark"]{--royal:#7FA6FF;--bg:#0E1424;--surface:#161E33;--text:#E6EBF7;--muted:#9AA6C4;--line:#2A3556;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Heebo,"Segoe UI",Arial,sans-serif}
+#boot{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--surface);border-radius:16px;box-shadow:0 10px 40px rgba(0,20,70,.15);width:min(380px,100%);overflow:hidden}
+.card .hd{background:linear-gradient(90deg,#081640,#0033A0);color:#fff;padding:18px 20px;font-size:22px;font-weight:800}
+.card .bd{padding:18px 20px}
+.card input{width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--surface);color:var(--text);direction:ltr}
+.card button{width:100%;border:0;border-radius:10px;padding:12px;font:inherit;font-size:17px;font-weight:800;background:var(--royal);color:#fff;cursor:pointer}
+.msg{color:var(--muted);font-size:14px;min-height:20px;margin-top:8px}
+.msg.err{color:var(--red)}
+#upd{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);background:#16A34A;color:#fff;padding:10px 18px;border-radius:12px;font-weight:700;z-index:999;font-family:Heebo,Arial,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+#upd[hidden]{display:none}
+</style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<div id="boot"><div class="card"><div class="hd">סידור משמרת</div><div class="bd" id="bootBody"><div class="msg">טוען…</div></div></div></div>
+<div id="upd" hidden>גרסה חדשה. מרענן…</div>
+<script>
+(function () {
+  'use strict';
+  // ===== הגדרות Firebase: מתוך config.js שבאותה תיקייה (const firebaseConfig = {...}) =====
+  var FIREBASE_CONFIG = (typeof firebaseConfig !== 'undefined') ? firebaseConfig : null;
+  var EMAIL_DOMAIN = 'shift-roster.app';            // מספר אישי 1234567 הופך ל- 1234567@shift-roster.app
+  var toEmail = function (num) { return String(num).trim() + '@' + EMAIL_DOMAIN; };
+
+  var body = document.getElementById('bootBody');
+  if (!FIREBASE_CONFIG) { body.innerHTML = '<div class="msg err">חסר הקובץ config.js עם הגדרות Firebase (ראה הוראות ההתקנה).</div>'; return; }
+  if (!window.firebase) { body.innerHTML = '<div class="msg err">לא ניתן לטעון את Firebase. בדוק את החיבור לאינטרנט.</div>'; return; }
+  firebase.initializeApp(FIREBASE_CONFIG);
+  var auth = firebase.auth(), fs = firebase.firestore();
+  var running = null, unApp = null, me = null;
+  var clean = function (o) { return JSON.parse(JSON.stringify(o)); };
+  var meta = function (s) { return { fromCache: s.metadata.fromCache, hasPendingWrites: s.metadata.hasPendingWrites }; };
+
+  // שכבת השמירה שהאפליקציה משתמשת בה: Firestore, בזמן אמת
+  function makeStore() {
+    return {
+      shared: true,
+      watchRoster: function (cb, err) { return fs.doc('data/roster').onSnapshot(function (s) { cb(s.exists ? s.data() : null, meta(s)); }, err); },
+      watchShift: function (key, cb, err) { return fs.doc('data/shift_' + key).onSnapshot(function (s) { cb(s.exists ? s.data() : null, meta(s)); }, err); },
+      saveRoster: function (r) { return fs.doc('data/roster').set(clean(r)); },
+      saveShift: function (key, s) { return fs.doc('data/shift_' + key).set(clean(s)); },
+      signOut: function () { return auth.signOut().then(function () { location.reload(); }); },
+      account: {
+        me: me,
+        isAdmin: me && me.role === 'admin',
+        listUsers: function () { return fs.collection('users').get().then(function (q) { return q.docs.map(function (d) { var o = d.data(); o.uid = d.id; return o; }); }); },
+        addUser: function (num, name, pw, role) {
+          var sec = firebase.apps.filter(function (a) { return a.name === 'creator'; })[0] || firebase.initializeApp(FIREBASE_CONFIG, 'creator');
+          var sa = sec.auth();
+          return sa.setPersistence(firebase.auth.Auth.Persistence.NONE)
+            .then(function () { return sa.createUserWithEmailAndPassword(toEmail(num), pw); })
+            .then(function (c) { var uid = c.user.uid; return sa.signOut().then(function () { return fs.doc('users/' + uid).set({ num: String(num).trim(), name: name, role: role || 'user', active: true, createdAt: new Date().toISOString() }); }); });
+        },
+        updateUser: function (uid, patch) { return fs.doc('users/' + uid).update(patch); },
+        changePassword: function (cur, nw) {
+          var u = auth.currentUser;
+          return u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, cur)).then(function () { return u.updatePassword(nw); });
+        }
+      }
+    };
+  }
+
+  function login(msg, isErr) {
+    document.getElementById('boot').style.display = '';
+    body.innerHTML = '<input id="em" type="text" inputmode="numeric" placeholder="מספר אישי" autocomplete="username"><input id="pw" type="password" placeholder="סיסמה" autocomplete="current-password"><button id="go">כניסה</button><div class="msg' + (isErr ? ' err' : '') + '" id="lm">' + (msg || '') + '</div>';
+    var go = function () {
+      var num = document.getElementById('em').value.trim(), pw = document.getElementById('pw').value;
+      if (!/^\d{3,12}$/.test(num)) { login('מספר אישי: ספרות בלבד', true); return; }
+      var em = toEmail(num);
+      document.getElementById('lm').textContent = 'מתחבר…'; document.getElementById('lm').className = 'msg';
+      auth.signInWithEmailAndPassword(em, pw).catch(function (e) {
+        var t = /invalid|wrong|not-found|credential/.test(e.code || '') ? 'מספר אישי או סיסמה שגויים' : e.code === 'auth/too-many-requests' ? 'יותר מדי ניסיונות. נסה שוב בעוד כמה דקות' : (e.code === 'auth/network-request-failed' ? 'אין חיבור לאינטרנט' : 'הכניסה נכשלה: ' + (e.message || e.code));
+        login(t, true);
+      });
+    };
+    document.getElementById('go').onclick = go;
+    document.getElementById('pw').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+  }
+
+  // הפעלת האפליקציה מתוך ה-HTML ששמור ב-Firestore
+  function start(html, version) {
+    running = version;
+    window.ROSTER_STORE = makeStore();
+    var d = new DOMParser().parseFromString(html, 'text/html');
+    d.head.querySelectorAll('link,style').forEach(function (n) { document.head.appendChild(document.importNode(n, true)); });
+    var title = d.querySelector('title'); if (title) document.title = title.textContent;
+    var scripts = [].slice.call(d.body.querySelectorAll('script'));
+    scripts.forEach(function (s) { s.remove(); });
+    document.getElementById('boot').remove();
+    var holder = document.createElement('div'); holder.innerHTML = d.body.innerHTML;
+    while (holder.firstChild) document.body.insertBefore(holder.firstChild, document.getElementById('upd'));
+    scripts.forEach(function (s) { var n = document.createElement('script'); n.textContent = s.textContent; document.body.appendChild(n); });
+  }
+
+  function watchApp() {
+    if (unApp) return;
+    unApp = fs.doc('app/current').onSnapshot(function (s) {
+      if (!s.exists) { body.innerHTML = '<div class="msg err">האפליקציה עוד לא פורסמה. פרסם אותה מתוך ניהול-סידור.html.</div>'; return; }
+      var v = s.data();
+      if (running === null) start(v.html, v.version);
+      else if (v.version !== running) {                       // גרסה חדשה פורסמה: מרעננים לכולם
+        document.getElementById('upd').hidden = false;
+        setTimeout(function () { location.reload(); }, 1500);
+      }
+    }, function (e) {
+      if (running === null) body.innerHTML = '<div class="msg err">לא ניתן לטעון את האפליקציה: ' + (e.code || e.message) + '</div>';
+    });
+  }
+
+  auth.onAuthStateChanged(function (u) {
+    if (!u) { if (running !== null) location.reload(); else login(); return; }
+    body.innerHTML = '<div class="msg">טוען את האפליקציה…</div>';
+    fs.doc('users/' + u.uid).get().then(function (s) {
+      var p = s.exists ? s.data() : null;
+      if (!p || p.active !== true) { auth.signOut(); login(p ? 'המשתמש הושבת. פנה למנהל.' : 'אין לך הרשאה עדיין. פנה למנהל.', true); return; }
+      me = { uid: u.uid, num: p.num, name: p.name, role: p.role };
+      watchApp();
+    }).catch(function () { auth.signOut(); login('אין לך הרשאה עדיין. פנה למנהל.', true); });
+  });
+})();
+</script>
+</body>
+</html>
