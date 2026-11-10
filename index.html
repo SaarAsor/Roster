@@ -5,7 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="סידור משמרת">
-<meta name="theme-color" content="#081640">
+<meta name="theme-color" content="#071339">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script>
+  // התקנה כאפליקציה: שומרים את ההזמנה של הדפדפן עד שהאפליקציה תציג את הכפתור
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); window.__bip = e; });
+  if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+</script>
 <title>סידור משמרת</title>
 <style>
 :root{--royal:#0033A0;--bg:#F3F5FA;--surface:#fff;--text:#152038;--muted:#5B6782;--line:#E1E6EF;--red:#DC2626;color-scheme:light;box-sizing:border-box}
