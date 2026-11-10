@@ -59,7 +59,10 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Heebo,"Segoe UI
       signOut: function () { return auth.signOut().then(function () { location.reload(); }); },
       account: {
         me: me,
-        isAdmin: me && me.role === 'admin',
+        role: me && me.role,
+        isAdmin: !!(me && me.role === 'admin'),
+        canEdit: !(me && me.role === 'viewer'),
+        publishApp: function (html, version) { return fs.doc('app/current').set({ version: version, html: html, updatedAt: new Date().toISOString(), by: me.uid }); },
         listUsers: function () { return fs.collection('users').get().then(function (q) { return q.docs.map(function (d) { var o = d.data(); o.uid = d.id; return o; }); }); },
         addUser: function (num, name, pw, role) {
           var sec = firebase.apps.filter(function (a) { return a.name === 'creator'; })[0] || firebase.initializeApp(FIREBASE_CONFIG, 'creator');
